@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import anthropic
@@ -6,6 +6,7 @@ import httpx
 import os
 import json
 import re
+import time
 import yfinance as yf
 import pandas as pd
 from dotenv import load_dotenv
@@ -40,6 +41,19 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     domain: str
+
+# ── Simple rate limiter (max 5 requests per IP per minute) ───────────────────
+_rate_store: dict[str, list[float]] = {}
+RATE_LIMIT   = 5    # max requests
+RATE_WINDOW  = 60   # seconds
+
+def check_rate_limit(ip: str):
+    now  = time.time()
+    hits = [t for t in _rate_store.get(ip, []) if now - t < RATE_WINDOW]
+    if len(hits) >= RATE_LIMIT:
+        raise HTTPException(429, "Too many requests — please wait a minute.")
+    hits.append(now)
+    _rate_store[ip] = hits
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def extract_company_name(domain: str) -> str:
@@ -474,7 +488,8 @@ async def health():
     return {"status": "ok"}
 
 @app.post("/api/analyze")
-async def analyze(req: AnalyzeRequest):
+async def analyze(req: AnalyzeRequest, request: Request):
+    check_rate_limit(request.client.host)
     if not ANTHROPIC_API_KEY:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
