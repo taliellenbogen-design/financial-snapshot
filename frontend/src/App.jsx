@@ -1,12 +1,30 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SearchBar from './components/SearchBar'
 import FinancialDashboard from './components/FinancialDashboard'
 import { analyzeCompany } from './api'
 
 export default function App() {
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
+  const [data, setData]         = useState(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState(null)
+  const [loadingMsg, setLoadingMsg] = useState(0)
+
+  const LOADING_STEPS = [
+    'Looking up the company…',
+    'Fetching latest financial results…',
+    'Reading the SEC quarterly report…',
+    'Generating insights with AI…',
+    'Almost there…',
+  ]
+
+  useEffect(() => {
+    if (!loading) return
+    setLoadingMsg(0)
+    const timers = LOADING_STEPS.slice(1).map((_, i) =>
+      setTimeout(() => setLoadingMsg(i + 1), (i + 1) * 6000)
+    )
+    return () => timers.forEach(clearTimeout)
+  }, [loading])
 
   async function handleSearch(domain) {
     setLoading(true)
@@ -54,9 +72,21 @@ export default function App() {
 
         {/* ── Loading ── */}
         {loading && (
-          <div className="mt-20 flex flex-col items-center gap-3 text-gray-400">
-            <div className="w-7 h-7 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm">Fetching financial reports &amp; generating insights…</span>
+          <div className="mt-20 flex flex-col items-center gap-4 text-gray-400">
+            <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm font-medium text-gray-500 transition-all">
+              {LOADING_STEPS[loadingMsg]}
+            </p>
+            <div className="flex gap-1.5 mt-1">
+              {LOADING_STEPS.map((_, i) => (
+                <div
+                  key={i}
+                  className="w-1.5 h-1.5 rounded-full transition-all duration-500"
+                  style={{ background: i <= loadingMsg ? '#6366F1' : '#D1D5DB' }}
+                />
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">This takes about 20–30 seconds</p>
           </div>
         )}
 
