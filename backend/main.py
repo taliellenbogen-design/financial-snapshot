@@ -520,15 +520,23 @@ async def analyze(req: AnalyzeRequest, request: Request):
     if not ticker_symbol:
         raise HTTPException(404, f"No US-listed company found for '{domain}'.")
 
-    # ── 2. Fetch financial data from Yahoo Finance ───────────────────────────
-    try:
-        ticker   = yf.Ticker(ticker_symbol)
-        info     = ticker.info or {}
-        income_q = ticker.quarterly_income_stmt
-        cf_q     = ticker.quarterly_cashflow
-    except Exception as e:
-        print(f"[yfinance data] {e}")
-        raise HTTPException(503, f"Could not retrieve financial data for {ticker_symbol}")
+    # ── 2. Fetch financial data from Yahoo Finance (with retry) ─────────────
+    ticker = yf.Ticker(ticker_symbol)
+    info = {}
+    income_q = None
+    cf_q = None
+    for attempt in range(3):
+        try:
+            info     = ticker.info or {}
+            income_q = ticker.quarterly_income_stmt
+            cf_q     = ticker.quarterly_cashflow
+            if income_q is not None and not income_q.empty:
+                break
+            print(f"[yfinance] attempt {attempt+1}: empty data for {ticker_symbol}, retrying…")
+        except Exception as e:
+            print(f"[yfinance] attempt {attempt+1} error: {e}")
+            if attempt == 2:
+                raise HTTPException(503, f"Could not retrieve financial data for {ticker_symbol}")
 
     if income_q is None or income_q.empty:
         raise HTTPException(404, f"No income statement data for {ticker_symbol}")
