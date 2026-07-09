@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import anthropic
 import httpx
+import requests
 import os
 import json
 import re
@@ -520,8 +521,19 @@ async def analyze(req: AnalyzeRequest, request: Request):
     if not ticker_symbol:
         raise HTTPException(404, f"No US-listed company found for '{domain}'.")
 
-    # ── 2. Fetch financial data from Yahoo Finance (with retry) ─────────────
-    ticker = yf.Ticker(ticker_symbol)
+    # ── 2. Fetch financial data from Yahoo Finance (with browser session) ───
+    yf_session = requests.Session()
+    yf_session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+
+    ticker = yf.Ticker(ticker_symbol, session=yf_session)
     info = {}
     income_q = None
     cf_q = None
