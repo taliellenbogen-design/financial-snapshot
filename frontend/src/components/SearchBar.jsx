@@ -1,6 +1,12 @@
 import { useState } from 'react'
 
-const EXAMPLES = ['apple.com', 'microsoft.com', 'nvidia.com', 'amazon.com', 'meta.com']
+const EXAMPLES = [
+  { domain: 'apple.com',     label: 'Apple' },
+  { domain: 'microsoft.com', label: 'Microsoft' },
+  { domain: 'nvidia.com',    label: 'Nvidia' },
+  { domain: 'amazon.com',    label: 'Amazon' },
+  { domain: 'meta.com',      label: 'Meta' },
+]
 
 export default function SearchBar({ onSearch, loading, hasData, onReset }) {
   const [domain, setDomain] = useState('')
@@ -16,8 +22,8 @@ export default function SearchBar({ onSearch, loading, hasData, onReset }) {
   }
 
   function handleExample(ex) {
-    setDomain(ex)
-    onSearch(ex)
+    setDomain(ex.domain)
+    onSearch(ex.domain)
   }
 
   return (
@@ -57,13 +63,19 @@ export default function SearchBar({ onSearch, loading, hasData, onReset }) {
           <span className="text-xs text-gray-300">Try:</span>
           {EXAMPLES.map(ex => (
             <button
-              key={ex}
+              key={ex.domain}
               type="button"
               onClick={() => handleExample(ex)}
               disabled={loading}
-              className="text-xs text-indigo-400 hover:text-indigo-600 hover:underline disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-40 transition-colors"
             >
-              {ex}
+              <img
+                src={`https://logo.clearbit.com/${ex.domain}`}
+                alt=""
+                className="w-3.5 h-3.5 rounded-sm object-contain"
+                onError={e => { e.target.style.display = 'none' }}
+              />
+              <span className="text-xs text-gray-600 font-medium">{ex.label}</span>
             </button>
           ))}
         </div>
