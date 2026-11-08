@@ -616,7 +616,7 @@ async def analyze(req: AnalyzeRequest, request: Request):
     stock_history = []
     current_price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
     try:
-        hist = yf.Ticker(ticker_symbol).history(period="1y")
+        hist = yf.Ticker(ticker_symbol, session=yf_session).history(period="1y")
         print(f"[stock history] rows={len(hist)}, cols={list(hist.columns) if not hist.empty else []}")
         if not hist.empty:
             sampled = hist["Close"].iloc[::5]   # every ~5 trading days ≈ weekly
