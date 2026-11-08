@@ -319,13 +319,15 @@ async def fetch_10q_mda(ticker: str) -> str | None:
                 if not doc_url:
                     continue
 
+                # Request only the first 2MB — enough for any MD&A section
+                dl_headers = {**SEC_HEADERS, "Range": "bytes=0-2097151"}
                 try:
-                    doc_r = await client.get(doc_url, headers=SEC_HEADERS, timeout=60.0)
+                    doc_r = await client.get(doc_url, headers=dl_headers, timeout=45.0)
                 except httpx.TimeoutException:
                     print(f"[SEC] Timeout fetching {doc_url}")
                     continue
 
-                if doc_r.status_code != 200:
+                if doc_r.status_code not in (200, 206):
                     print(f"[SEC] Got HTTP {doc_r.status_code} for {doc_url}")
                     continue
 
