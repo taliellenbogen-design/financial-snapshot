@@ -18,6 +18,7 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL      = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
 FRONTEND_URL      = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FMP_API_KEY       = os.getenv("FMP_API_KEY")
 
 SEC_HEADERS = {
     "User-Agent": "FinancialSnapshot/1.0 (research tool; contact: research@financialsnapshot.app)",
@@ -483,6 +484,25 @@ MD&A:
         print(f"[Claude SEC insights] {e}")
         return None
 
+# ── FMP profile ───────────────────────────────────────────────────────────────
+async def get_fmp_profile(ticker: str) -> dict:
+    """Fetch company profile from Financial Modeling Prep API."""
+    if not FMP_API_KEY:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"https://financialmodelingprep.com/api/v3/profile/{ticker}",
+                params={"apikey": FMP_API_KEY},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data and isinstance(data, list):
+                    return data[0]
+    except Exception as e:
+        print(f"[FMP profile] {e}")
+    return {}
+
 # ── Main route ────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
@@ -553,6 +573,10 @@ async def analyze(req: AnalyzeRequest, request: Request):
     if income_q is None or income_q.empty:
         raise HTTPException(404, f"No income statement data for {ticker_symbol}")
 
+    # ── 2b. FMP profile (company info yfinance can't provide on cloud) ───────
+    fmp = await get_fmp_profile(ticker_symbol)
+    print(f"[FMP profile] got keys: {list(fmp.keys())[:8] if fmp else 'empty'}")
+
     # ── 3. Process numbers ───────────────────────────────────────────────────
     cols     = income_q.columns.tolist()
     latest   = income_q[cols[0]]
@@ -570,10 +594,10 @@ async def analyze(req: AnalyzeRequest, request: Request):
     gross_margin   = round(gross_profit / revenue * 100, 1) if revenue else 0
     net_margin     = round(net_income   / revenue * 100, 1) if revenue else 0
 
-    eps    = float(info.get("trailingEps") or 0)
-    ebitda = float(info.get("ebitda")      or 0)
-    mkt_cap = float(info.get("marketCap")  or 0)
-    pe_raw  = info.get("trailingPE")
+    eps     = float(fmp.get("eps")    or info.get("trailingEps") or 0)
+    ebitda  = float(info.get("ebitda") or 0)
+    mkt_cap = float(fmp.get("mktCap") or info.get("marketCap")  or 0)
+    pe_raw  = fmp.get("pe") or info.get("trailingPE")
     pe_ratio = round(float(pe_raw), 1) if pe_raw else None
 
     fcf = 0.0
@@ -614,19 +638,23 @@ async def analyze(req: AnalyzeRequest, request: Request):
 
     # Stock price history — weekly samples over 1 year
     stock_history = []
-    current_price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+    current_price = float(fmp.get("price") or info.get("currentPrice") or info.get("regularMarketPrice") or 0)
     try:
         hist = yf.Ticker(ticker_symbol, session=yf_session).history(period="1y")
         print(f"[stock history] rows={len(hist)}, cols={list(hist.columns) if not hist.empty else []}")
         if not hist.empty:
             sampled = hist["Close"].iloc[::5]   # every ~5 trading days ≈ weekly
-            for date, price in sampled.items():
-                p = float(price)
-                if p > 0 and p < 1_000_000:   # filter sentinel values
-                    stock_history.append({
-                        "date":  pd.Timestamp(date).strftime("%b '%y"),
-                        "price": round(p, 2),
-                    })
+            prices  = [float(p) for p in sampled if float(p) > 0]
+            if prices:
+                sorted_p = sorted(prices)
+                median_p = sorted_p[len(sorted_p) // 2]
+                for date, price in sampled.items():
+                    p = float(price)
+                    if p > 0 and p > median_p / 3 and p < median_p * 3:
+                        stock_history.append({
+                            "date":  pd.Timestamp(date).strftime("%b '%y"),
+                            "price": round(p, 2),
+                        })
             print(f"[stock history] {len(stock_history)} points, first={stock_history[0] if stock_history else None}")
         else:
             print(f"[stock history] empty dataframe for {ticker_symbol}")
@@ -635,13 +663,14 @@ async def analyze(req: AnalyzeRequest, request: Request):
 
     period_str = quarter_label(cols[0]) if cols else ""
 
-    # CEO
-    ceo = None
-    for officer in info.get("companyOfficers", []):
-        title = officer.get("title", "").upper()
-        if "CEO" in title or "CHIEF EXECUTIVE" in title:
-            ceo = officer.get("name")
-            break
+    # CEO — FMP returns it directly; fall back to yfinance officers list
+    ceo = fmp.get("ceo") or None
+    if not ceo:
+        for officer in info.get("companyOfficers", []):
+            title = officer.get("title", "").upper()
+            if "CEO" in title or "CHIEF EXECUTIVE" in title:
+                ceo = officer.get("name")
+                break
 
     # ── 4. Claude: financial highlights ─────────────────────────────────────
     trend_lines = "\n".join(
@@ -655,8 +684,12 @@ async def analyze(req: AnalyzeRequest, request: Request):
     qoq_rev    = yoy(revenue, prev_q_rev)
     qoq_ni     = yoy(net_income, prev_q_ni)
 
-    claude_data = f"""Company: {info.get('longName', ticker_symbol)} ({ticker_symbol})
-Sector: {info.get('sector','N/A')} | Industry: {info.get('industry','N/A')}
+    company_name_full = fmp.get("companyName") or info.get("longName") or info.get("shortName") or ticker_symbol
+    company_sector    = fmp.get("sector")   or info.get("sector",   "N/A")
+    company_industry  = fmp.get("industry") or info.get("industry", "N/A")
+
+    claude_data = f"""Company: {company_name_full} ({ticker_symbol})
+Sector: {company_sector} | Industry: {company_industry}
 Latest Quarter: {period_str}
 
 YEAR-OVER-YEAR (same quarter last year):
@@ -681,7 +714,7 @@ QUARTERLY TREND (oldest → newest):
     try:
         mda_text = await fetch_10q_mda(ticker_symbol)
         if mda_text:
-            company_full_name = info.get("longName") or info.get("shortName") or ticker_symbol
+            company_full_name = company_name_full
             sec_insights = get_sec_insights(mda_text, company_full_name)
     except Exception as e:
         print(f"[SEC insights] Skipping due to error: {e}")
@@ -689,16 +722,16 @@ QUARTERLY TREND (oldest → newest):
     # ── 6. Return ────────────────────────────────────────────────────────────
     return {
         "company": {
-            "name":        info.get("longName") or info.get("shortName"),
+            "name":        company_name_full,
             "ticker":      ticker_symbol,
-            "sector":      info.get("sector"),
-            "industry":    info.get("industry"),
-            "logo":        f"https://logo.clearbit.com/{domain}",
-            "website":     info.get("website"),
+            "sector":      company_sector,
+            "industry":    company_industry,
+            "logo":        fmp.get("image") or f"https://logo.clearbit.com/{domain}",
+            "website":     fmp.get("website")  or info.get("website"),
             "ceo":         ceo,
-            "employees":   info.get("fullTimeEmployees"),
-            "exchange":    info.get("exchange"),
-            "description": (info.get("longBusinessSummary") or "")[:300],
+            "employees":   fmp.get("fullTimeEmployees") or info.get("fullTimeEmployees"),
+            "exchange":    fmp.get("exchangeShortName") or info.get("exchange"),
+            "description": (fmp.get("description") or info.get("longBusinessSummary") or "")[:300],
         },
         "metrics": {
             "revenue":        revenue,
