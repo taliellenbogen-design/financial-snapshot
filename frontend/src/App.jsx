@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import SearchBar from './components/SearchBar'
 import FinancialDashboard from './components/FinancialDashboard'
+import LoadingState from './components/LoadingState'
 import { analyzeCompany } from './api'
 
 export default function App() {
@@ -71,24 +72,7 @@ export default function App() {
         )}
 
         {/* ── Loading ── */}
-        {loading && (
-          <div className="mt-20 flex flex-col items-center gap-4 text-gray-400">
-            <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm font-medium text-gray-500 transition-all">
-              {LOADING_STEPS[loadingMsg]}
-            </p>
-            <div className="flex gap-1.5 mt-1">
-              {LOADING_STEPS.map((_, i) => (
-                <div
-                  key={i}
-                  className="w-1.5 h-1.5 rounded-full transition-all duration-500"
-                  style={{ background: i <= loadingMsg ? '#6366F1' : '#D1D5DB' }}
-                />
-              ))}
-            </div>
-            <p className="text-xs text-gray-400 mt-1">This takes about 20–30 seconds</p>
-          </div>
-        )}
+        {loading && <LoadingState step={loadingMsg} />}
 
         {/* ── Results ── */}
         {data && <FinancialDashboard data={data} />}
