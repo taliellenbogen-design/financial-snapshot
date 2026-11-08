@@ -70,10 +70,9 @@ export default function SearchBar({ onSearch, loading, hasData, onReset }) {
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-40 transition-colors"
             >
               <img
-                src={`https://logo.clearbit.com/${ex.domain}`}
+                src={`https://www.google.com/s2/favicons?domain=${ex.domain}&sz=32`}
                 alt=""
-                className="w-3.5 h-3.5 rounded-sm object-contain"
-                onError={e => { e.target.style.display = 'none' }}
+                className="w-3.5 h-3.5 object-contain"
               />
               <span className="text-xs text-gray-600 font-medium">{ex.label}</span>
             </button>
